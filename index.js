@@ -57,10 +57,13 @@ class TaskTracker {
             throw new Error(`job ${job.taskId} action ${job.action} is not found`);
         }
         let result = await Reflect.apply(ACTIONS.get(job.action), this, [job]);
-        if (result !== true) {
+        if (result === false) {
             throw new Error(`execute fail`);
         }
-        return new PublicStruct.HostInfo({host: this.host, port: this.port, pid: process.pid});
+        return new PublicStruct.ExecuteResult({
+            msg: typeof result === 'string' ? result : '',
+            info: {host: this.host, port: this.port, pid: process.pid}
+        });
     }
 
     action(action, handler) {

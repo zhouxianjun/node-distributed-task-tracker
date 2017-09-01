@@ -6,5 +6,5 @@ const TaskTracker = require('./index');
 TaskTracker.instance(zk, 'test', {port: 9080});
 TaskTracker.instance().action('say', async job => {
     console.log(`job ${job.taskId}-${job.params} say ok ${job.params && typeof job.params}`);
-    return true;
+    return 'ok';
 });
