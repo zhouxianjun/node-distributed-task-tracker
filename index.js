@@ -29,6 +29,9 @@ class TaskTracker {
             async value(job) {
                 logger.debug(`RECEIVE JOB ${job.taskId}`);
                 try {
+                    if (job.params) {
+                        job.params = JSON.parse(job.params);
+                    }
                     return await self.handler(job);
                 } catch (err) {
                     logger.error(`job ${job.taskId} handler error`, err);
