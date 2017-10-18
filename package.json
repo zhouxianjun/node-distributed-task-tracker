@@ -16,6 +16,7 @@
   "dependencies": {
     "node-zookeeper-client": "^0.2.2",
     "tracer-logger": "^1.0.3",
-    "trc": "^1.0.6"
+    "trc": "^1.0.7",
+    "thrift": "^0.10.0"
   }
 }

@@ -1,8 +1,11 @@
 'use strict';
+const path = require('path');
 const trc = require('trc');
 const logger = require('tracer-logger');
 const instance = Symbol();
+const thrift = require('thrift');
 const ServerRegister = trc.ServerRegister;
+const ServerProvider = trc.ServerProvider;
 const PublicStruct = require('./thrift/PublicStruct_types');
 class TaskProcessor {
     static get thrift() {
@@ -22,7 +25,6 @@ class TaskTracker {
             throw new ReferenceError('Cannot be instantiated, please use static instance function');
 
         const self = this;
-        let server = new ServerRegister(zk, config);
         Reflect.defineProperty(TaskProcessor, 'attr', {writable: false, configurable: false, value: `{"nodeGroup": "${group}"}`});
         Reflect.defineProperty(TaskProcessor.prototype, 'execute', {
             writable: false, configurable: false,
@@ -39,10 +41,23 @@ class TaskTracker {
                 }
             }
         });
-        this.host = server.config.host;
-        this.port = server.config.port;
-        server.loadObject(TaskProcessor, 'TaskProcessor').then(() => logger.info(`TaskProcessor auto loaded`));
-        server.on('ready', () => this.ready = true);
+
+        (async () => {
+            let provider = new ServerProvider(zk, Object.assign({
+                invoker: new trc.invoker.factory.PoolInvokerFactory({
+                    transport: thrift.TFramedTransport,
+                    protocol: thrift.TCompactProtocol
+                }),
+                loadBalance: new trc.loadBalance.RoundRobinLoadBalance(),
+            }, config));
+            await provider.loadType(path.resolve(__dirname, './thrift'));
+            let server = new ServerRegister(zk, config);
+            self.host = server.config.host;
+            self.port = server.config.port;
+            await server.loadObject(TaskProcessor, 'TaskProcessor');
+            self.ready = true;
+            self.hostInfo = {host: self.host, port: self.port, pid: process.pid};
+        })();
     }
 
     static instance(zk, group, config) {
@@ -56,19 +71,41 @@ class TaskTracker {
         if (!ACTIONS.has(job.action)) {
             throw new Error(`job ${job.taskId} action ${job.action} is not found`);
         }
-        let result = await Reflect.apply(ACTIONS.get(job.action), this, [job]);
-        if (result === false) {
-            throw new Error(`execute fail`);
-        }
+        setImmediate(async () => {
+            try {
+                let result = await Reflect.apply(ACTIONS.get(job.action), this, [job]);
+                let jobService = await this.getService();
+                await jobService.complete(job.taskId, typeof result === 'string' ? result : 'ok', new PublicStruct.HostInfo(this.hostInfo), typeof result === 'string' || result === true);
+            } catch (e) {
+                logger.error(`execute job ${job.taskId} error`, e);
+            }
+        });
+
         return new PublicStruct.ExecuteResult({
-            msg: typeof result === 'string' ? result : '',
-            info: {host: this.host, port: this.port, pid: process.pid}
+            msg: 'ok',
+            info: this.hostInfo
         });
     }
 
     action(action, handler) {
         ACTIONS.set(action, handler);
         return this;
+    }
+
+    async getService() {
+        if (this.jobService) return this.jobService;
+        if (this.ready !== true && !this.jobService) {
+            await TaskTracker.sleep(500);
+            return this.getService();
+        }
+        this.jobService = trc.ServerProvider.instance(require('./thrift/JobService'));
+        return this.jobService;
+    }
+
+    static sleep(n) {
+        return new Promise(resolve => {
+            setTimeout(() => resolve(), n);
+        });
     }
 }
 module.exports = TaskTracker;
